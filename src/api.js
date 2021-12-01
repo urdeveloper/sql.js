@@ -116,6 +116,7 @@ Module["onRuntimeInitialized"] = function onRuntimeInitialized() {
         "number",
         ["number", "number", "number"]
     );
+
     var sqlite3_bind_parameter_index = cwrap(
         "sqlite3_bind_parameter_index",
         "number",
@@ -358,6 +359,19 @@ Module["onRuntimeInitialized"] = function onRuntimeInitialized() {
         return sqlite3_column_double(this.stmt, pos);
     };
 
+    Statement.prototype.getBigInt = function getBigInt(pos) {
+        if (pos == null) {
+            pos = this.pos;
+            this.pos += 1;
+        }
+        var text = sqlite3_column_text(this.stmt, pos);
+        if (typeof BigInt !== "function") {
+            throw new Error("BigInt is not supported");
+        }
+        /* global BigInt */
+        return BigInt(text);
+    };
+
     Statement.prototype.getString = function getString(pos) {
         if (pos == null) {
             pos = this.pos;
@@ -390,8 +404,13 @@ Module["onRuntimeInitialized"] = function onRuntimeInitialized() {
     <caption>Print all the rows of the table test to the console</caption>
     var stmt = db.prepare("SELECT * FROM test");
     while (stmt.step()) console.log(stmt.get());
+
+    <caption>Enable BigInt support</caption>
+    var stmt = db.prepare("SELECT * FROM test");
+    while (stmt.step()) console.log(stmt.get(null, {useBigInt: true}));
      */
-    Statement.prototype["get"] = function get(params) {
+    Statement.prototype["get"] = function get(params, config) {
+        config = config || {};
         if (params != null && this["bind"](params)) {
             this["step"]();
         }
@@ -400,6 +419,11 @@ Module["onRuntimeInitialized"] = function onRuntimeInitialized() {
         for (var field = 0; field < ref; field += 1) {
             switch (sqlite3_column_type(this.stmt, field)) {
                 case SQLITE_INTEGER:
+                    var getfunc = config["useBigInt"]
+                        ? this.getBigInt(field)
+                        : this.getNumber(field);
+                    results1.push(getfunc);
+                    break;
                 case SQLITE_FLOAT:
                     results1.push(this.getNumber(field));
                     break;
@@ -451,8 +475,8 @@ Module["onRuntimeInitialized"] = function onRuntimeInitialized() {
         console.log(stmt.getAsObject());
         // Will print {nbr:5, data: Uint8Array([1,2,3]), null_value:null}
      */
-    Statement.prototype["getAsObject"] = function getAsObject(params) {
-        var values = this["get"](params);
+    Statement.prototype["getAsObject"] = function getAsObject(params, config) {
+        var values = this["get"](params, config);
         var names = this["getColumnNames"]();
         var rowObject = {};
         for (var i = 0; i < names.length; i += 1) {
@@ -560,10 +584,15 @@ Module["onRuntimeInitialized"] = function onRuntimeInitialized() {
             pos = this.pos;
             this.pos += 1;
         }
+
         switch (typeof val) {
             case "string":
                 return this.bindString(val, pos);
             case "number":
+                return this.bindNumber(val + 0, pos);
+            case "bigint":
+                // BigInt is not fully supported yet at WASM level.
+                return this.bindString(val.toString(), pos);
             case "boolean":
                 return this.bindNumber(val + 0, pos);
             case "object":
@@ -617,7 +646,7 @@ Module["onRuntimeInitialized"] = function onRuntimeInitialized() {
     by bound parameters.
      */
     Statement.prototype["reset"] = function reset() {
-        this.freemem();
+        this["freemem"]();
         return (
             sqlite3_clear_bindings(this.stmt) === SQLITE_OK
             && sqlite3_reset(this.stmt) === SQLITE_OK
@@ -637,7 +666,7 @@ Module["onRuntimeInitialized"] = function onRuntimeInitialized() {
      */
     Statement.prototype["free"] = function free() {
         var res;
-        this.freemem();
+        this["freemem"]();
         res = sqlite3_finalize(this.stmt) === SQLITE_OK;
         delete this.db.statements[this.stmt];
         this.stmt = NULL;
@@ -782,13 +811,23 @@ Module["onRuntimeInitialized"] = function onRuntimeInitialized() {
     * @memberof module:SqlJs
     * Open a new database either by creating a new one or opening an existing
     * one stored in the byte array passed in first argument
-    * @param {number[]} data An array of bytes representing
-    * an SQLite database file
+    * @param {number[]|string} data An array of bytes representing
+    * an SQLite database file or a path
+    * @param {Object} opts Options to specify a filename
     */
-    function Database(data) {
-        this.filename = "dbfile_" + (0xffffffff * Math.random() >>> 0);
-        if (data != null) {
+    function Database(data, { filename = false } = {}) {
+        if(filename === false) {
+          this.filename = "dbfile_" + (0xffffffff * Math.random() >>> 0);
+          this.memoryFile = true;
+          if (data != null) {
             FS.createDataFile("/", this.filename, data, true, true);
+          }
+        } else if (typeof filename==='string' && data != null) {
+            this.filename = filename;
+            FS.createDataFile("/", this.filename, data, true, true);
+        }
+        else {
+          this.filename = data;
         }
         this.handleError(sqlite3_open(this.filename, apiTemp));
         this.db = getValue(apiTemp, "i32");
@@ -899,7 +938,7 @@ Module["onRuntimeInitialized"] = function onRuntimeInitialized() {
     (separated by `;`). This limitation does not apply to params as an object.
     * @return {Database.QueryExecResult[]} The results of each statement
     */
-    Database.prototype["exec"] = function exec(sql, params) {
+    Database.prototype["exec"] = function exec(sql, params, config) {
         if (!this.db) {
             throw "Database closed";
         }
@@ -937,7 +976,7 @@ Module["onRuntimeInitialized"] = function onRuntimeInitialized() {
                             };
                             results.push(curresult);
                         }
-                        curresult["values"].push(stmt["get"]());
+                        curresult["values"].push(stmt["get"](null, config));
                     }
                     stmt["free"]();
                 }
@@ -971,7 +1010,9 @@ Module["onRuntimeInitialized"] = function onRuntimeInitialized() {
             function (row){console.log(row.name + " is a grown-up.")}
     );
      */
-    Database.prototype["each"] = function each(sql, params, callback, done) {
+    Database.prototype["each"] = function each(
+        sql, params, callback, done, config
+    ) {
         var stmt;
         if (typeof params === "function") {
             done = callback;
@@ -981,7 +1022,7 @@ Module["onRuntimeInitialized"] = function onRuntimeInitialized() {
         stmt = this["prepare"](sql, params);
         try {
             while (stmt["step"]()) {
-                callback(stmt["getAsObject"]());
+                callback(stmt["getAsObject"](null, config));
             }
         } finally {
             stmt["free"]();
@@ -1072,7 +1113,10 @@ Module["onRuntimeInitialized"] = function onRuntimeInitialized() {
         Object.values(this.functions).forEach(removeFunction);
         this.functions = {};
         this.handleError(sqlite3_close_v2(this.db));
-        FS.unlink("/" + this.filename);
+
+        if(this.memoryFile) {
+          FS.unlink("/" + this.filename);
+        }
         this.db = null;
     };
 
@@ -1200,4 +1244,49 @@ Module["onRuntimeInitialized"] = function onRuntimeInitialized() {
 
     // export Database to Module
     Module.Database = Database;
+
+    // Because emscripten doesn't allow us to handle `ioctl`, we need
+    // to manually install lock/unlock methods. Unfortunately we need
+    // to keep track of a mapping of `sqlite_file*` pointers to filename
+    // so that we can tell our filesystem which files to lock/unlock
+    var sqliteFiles = new Map();
+
+    Module["register_for_idb"] = (customFS) => {
+      var SQLITE_BUSY = 5;
+
+      function open(namePtr, file) {
+        var path = UTF8ToString(namePtr);
+        sqliteFiles.set(file, path);
+      }
+
+      function lock(file, lockType) {
+        var path = sqliteFiles.get(file);
+        var success = customFS.lock(path, lockType)
+        return success? 0 : SQLITE_BUSY;
+      }
+
+      function unlock(file,lockType) {
+        var path = sqliteFiles.get(file);
+        customFS.unlock(path, lockType)
+        return 0;
+      }
+
+      let lockPtr = addFunction(lock, 'iii');
+      let unlockPtr = addFunction(unlock, 'iii');
+      let openPtr = addFunction(open, 'vii');
+      Module["_register_for_idb"](lockPtr, unlockPtr, openPtr)
+    }
+
+    // TODO: This isn't called from anywhere yet. We need to
+    // somehow cleanup closed files from `sqliteFiles`
+    Module["cleanup_file"] = (path) => {
+      let filesInfo = [...sqliteFiles.entries()]
+      let fileInfo = filesInfo.find(f => f[1] === path);
+      sqliteFiles.delete(fileInfo[0])
+    }
+
+    Module["reset_filesystem"] = () => {
+      FS.root = null;
+      FS.staticInit();
+    }
 };

@@ -38,6 +38,13 @@ const db = new SQL.Database();
 // NOTE: You can also use new SQL.Database(data) where
 // data is an Uint8Array representing an SQLite database file
 
+
+// Execute a single SQL string that contains multiple statements
+let sqlstr = "CREATE TABLE hello (a int, b char); \
+INSERT INTO hello VALUES (0, 'hello'); \
+INSERT INTO hello VALUES (1, 'world');";
+db.run(sqlstr); // Run the query without returning anything
+
 // Prepare an sql statement
 const stmt = db.prepare("SELECT * FROM hello WHERE a=:aval AND b=:bval");
 
@@ -52,12 +59,6 @@ while (stmt.step()) console.log(stmt.get()); // Will print [0, 'hello']
 stmt.free();
 // You can not use your statement anymore once it has been freed.
 // But not freeing your statements causes memory leaks. You don't want that.
-
-// Execute a single SQL string that contains multiple statements
-let sqlstr = "CREATE TABLE hello (a int, b char);";
-sqlstr += "INSERT INTO hello VALUES (0, 'hello');"
-sqlstr += "INSERT INTO hello VALUES (1, 'world');"
-db.run(sqlstr); // Run the query without returning anything
 
 const res = db.exec("SELECT * FROM hello");
 /*
@@ -231,6 +232,33 @@ Example:
   });
 </script>
 ```
+### Enabling BigInt support
+If you need ```BigInt``` support, it is partially supported since most browsers now supports it including Safari.Binding ```BigInt``` is still not supported, only getting ```BigInt``` from the database is supported for now.
+
+```html
+<script>
+  const stmt = db.prepare("SELECT * FROM test");
+  const config = {useBigInt: true};
+  /*Pass optional config param to the get function*/
+  while (stmt.step()) console.log(stmt.get(null, config));
+
+  /*OR*/
+  const result = db.exec("SELECT * FROM test", config);
+  console.log(results[0].values)
+</script>
+```
+On WebWorker, you can just add ```config``` param before posting a message. With this, you wont have to pass config param on ```get``` function.
+
+```html
+<script>
+  worker.postMessage({
+    id:1,
+    action:"exec",
+    sql: "SELECT * FROM test",
+    config: {useBigInt: true}, /*Optional param*/
+  });
+</script>
+```
 
 See [examples/GUI/gui.js](examples/GUI/gui.js) for a full working example.
 
@@ -295,21 +323,8 @@ For each [release](https://github.com/sql-js/sql.js/releases/), you will find a 
  - `sql-asm-debug.js` : The _Debug_ asm.js version of Sql.js. Use this for local development.
  - `worker.*` - Web Worker versions of the above libraries. More limited API. See [examples/GUI/gui.js](examples/GUI/gui.js) for a good example of this.
 
-## Compiling
+## Compiling/Contributing
 
-- Install the EMSDK, [as described here](https://emscripten.org/docs/getting_started/downloads.html)
-- Run `npm run rebuild`
+General consumers of this library don't need to read any further. (The compiled files are available via the [release page](https://github.com/sql-js/sql.js/releases).)
 
-In order to enable extensions like FTS5, change the CFLAGS in the [Makefile](Makefile) and rebuild:
-
-``` diff
-CFLAGS = \
-        -O2 \
-        -DSQLITE_OMIT_LOAD_EXTENSION \
-        -DSQLITE_DISABLE_LFS \
-        -DSQLITE_ENABLE_FTS3 \
-        -DSQLITE_ENABLE_FTS3_PARENTHESIS \
-+       -DSQLITE_ENABLE_FTS5 \
-        -DSQLITE_ENABLE_JSON1 \
-        -DSQLITE_THREADSAFE=0
-```
+If you want to compile your own version of SQLite for WebAssembly, or want to contribute to this project, see [CONTRIBUTING.md](CONTRIBUTING.md).
