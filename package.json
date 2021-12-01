@@ -22,7 +22,7 @@
 		"build": "make",
 		"rebuild": "npm run clean && npm run build",
 		"clean": "make clean",
-		"test": "npm run lint && npm run test-asm && npm run test-asm-debug && npm run test-wasm && npm run test-wasm-debug && npm run test-asm-memory-growth",
+		"test": "npm run test-asm && npm run test-asm-debug && npm run test-wasm && npm run test-wasm-debug && npm run test-asm-memory-growth",
 		"lint": "eslint .",
 		"prettify": "eslint . --fix",
 		"test-asm": "node --unhandled-rejections=strict test/all.js asm",
