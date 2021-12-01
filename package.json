@@ -49,5 +49,8 @@
 		"puppeteer": "^10.2.0",
 		"test": ">=0.6"
 	},
-	"dependencies": {}
+	"dependencies": {},
+	"publishConfig": {
+  		"access": "public"
+	}
 }
