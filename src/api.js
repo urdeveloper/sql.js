@@ -822,6 +822,9 @@ Module["onRuntimeInitialized"] = function onRuntimeInitialized() {
           if (data != null) {
             FS.createDataFile("/", this.filename, data, true, true);
           }
+        } else if (typeof filename==='string' && data != null) {
+            this.filename = filename;
+            FS.createDataFile("/", this.filename, data, true, true);
         }
         else {
           this.filename = data;
